@@ -18,10 +18,8 @@
  * Keyboard shortcut: Ctrl+Shift+P - Cycle through modes
  *
  * CLI flags:
- *   --default              Start in default mode
- *   --accept-edits         Start in acceptEdits mode
- *   --full-auto            Start in fullAuto mode
- *   --bypass-permissions   Start in bypassPermissions mode
+ *   --permission-mode <mode>         Set permission mode (default, acceptEdits, fullAuto, bypassPermissions, plan)
+ *   --dangerously-skip-permissions   Shortcut for --permission-mode bypassPermissions
  *
  * Configuration:
  *   ~/.pi/agent/extensions/permissions.json (global)
@@ -51,11 +49,11 @@ interface PermissionsConfig {
 
 // --- Constants ---
 
-const MODES: { id: PermissionMode; flag: string; label: string; description: string }[] = [
-  { id: "default", flag: "default", label: "Default", description: "Confirm every write, edit, and bash command" },
-  { id: "acceptEdits", flag: "accept-edits", label: "Accept Edits", description: "Allow write/edit silently, confirm bash" },
-  { id: "fullAuto", flag: "full-auto", label: "Full Auto", description: "Allow write/edit/bash, confirm dangerous only" },
-  { id: "bypassPermissions", flag: "bypass-permissions", label: "Bypass Permissions", description: "Allow everything, block catastrophic commands" },
+const MODES: { id: PermissionMode; label: string; description: string }[] = [
+  { id: "default", label: "Default", description: "Confirm every write, edit, and bash command" },
+  { id: "acceptEdits", label: "Accept Edits", description: "Allow write/edit silently, confirm bash" },
+  { id: "fullAuto", label: "Full Auto", description: "Allow write/edit/bash, confirm dangerous only" },
+  { id: "bypassPermissions", label: "Bypass Permissions", description: "Allow everything, block catastrophic commands" },
 ];
 
 /**
@@ -156,14 +154,17 @@ async function loadConfig(): Promise<PermissionsConfig> {
 // --- Extension ---
 
 export default async function (pi: ExtensionAPI) {
-  // Register CLI flags
-  for (const m of MODES) {
-    pi.registerFlag(m.flag, {
-      description: `Start in ${m.label} permission mode`,
-      type: "boolean",
-      default: false,
-    });
-  }
+  // Register CLI flags (Claude Code compatible)
+  pi.registerFlag("permission-mode", {
+    description: "Permission mode (default, acceptEdits, fullAuto, bypassPermissions)",
+    type: "string",
+    default: "",
+  });
+  pi.registerFlag("dangerously-skip-permissions", {
+    description: "Bypass all permission checks (shortcut for --permission-mode bypassPermissions)",
+    type: "boolean",
+    default: false,
+  });
 
   const config = await loadConfig();
 
@@ -181,10 +182,15 @@ export default async function (pi: ExtensionAPI) {
     sessionAllow.tools.clear();
     sessionAllow.commands.clear();
 
-    // CLI flags override config
-    const flagMode = MODES.find((m) => pi.getFlag(m.flag) === true);
-    if (flagMode) {
-      mode = flagMode.id;
+    // CLI flags override config (Claude Code compatible)
+    if (pi.getFlag("dangerously-skip-permissions") === true) {
+      mode = "bypassPermissions";
+    } else {
+      const permMode = pi.getFlag("permission-mode");
+      if (permMode && typeof permMode === "string") {
+        const found = MODES.find((m) => m.id === permMode);
+        if (found) mode = found.id;
+      }
     }
   });
 
