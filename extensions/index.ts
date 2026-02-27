@@ -113,6 +113,24 @@ const DEFAULT_PROTECTED_PATHS = [
   "~/.pi/agent/auth.json",
 ];
 
+/**
+ * Shell trick patterns: commands containing these are treated as dangerous
+ * because they can hide arbitrary commands inside substitutions, eval, or
+ * pipe-to-shell constructs. Matched against the raw command string.
+ */
+const SHELL_TRICK_PATTERNS = [
+  { pattern: /\$\(/, description: "command substitution $(…)" },
+  { pattern: /`[^`]+`/, description: "backtick command substitution" },
+  { pattern: /\beval\b/, description: "eval execution" },
+  { pattern: /\bbash\s+-c\b/, description: "bash -c execution" },
+  { pattern: /\bsh\s+-c\b/, description: "sh -c execution" },
+  { pattern: /\|\s*(ba)?sh\b/, description: "pipe to shell" },
+  { pattern: /\bexec\b/, description: "exec execution" },
+  { pattern: /\bsource\b/, description: "source execution" },
+  { pattern: />\(/, description: "process substitution >(…)" },
+  { pattern: /<\(/, description: "process substitution <(…)" },
+];
+
 const GATED_TOOLS = new Set(["write", "edit", "bash"]);
 
 // --- Config loading ---
@@ -211,6 +229,24 @@ export default async function (pi: ExtensionAPI) {
           ctx.ui.notify(`🚫 Blocked bash targeting protected path: ${readable}`, "error");
         }
         return { block: true, reason: `Bash command references protected path ${readable}. This cannot be overridden.` };
+      }
+    }
+
+    // SHELL TRICK CHECK — always confirm (except bypassPermissions), no session override
+    if (toolName === "bash" && mode !== "bypassPermissions") {
+      const command = String(event.input.command ?? "");
+      const trick = SHELL_TRICK_PATTERNS.find((p) => p.pattern.test(command));
+      if (trick) {
+        if (!ctx.hasUI) {
+          return { block: true, reason: `Blocked shell trick: ${trick.description} (no UI for confirmation)` };
+        }
+        const displayCmd = command.length > 200 ? command.slice(0, 200) + "…" : command;
+        const options = ["Allow once", "Deny"];
+        const choice = await ctx.ui.select(`⚠️ bash: ${displayCmd}\n   ⚠️  SHELL TRICK: ${trick.description}`, options);
+        if (choice !== options[0]) {
+          return { block: true, reason: `User denied shell trick: ${trick.description}` };
+        }
+        return; // allowed once, no session override for shell tricks
       }
     }
 

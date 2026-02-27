@@ -115,6 +115,18 @@ Configuration is loaded from two optional JSON files, merged in order (project o
 | `catastrophicPatterns` | See defaults | Commands always blocked, all modes |
 | `protectedPaths` | See defaults | Paths where writes are always blocked |
 
+## Shell Trick Detection
+
+Commands containing shell constructs that can hide arbitrary execution are flagged as **⚠️ SHELL TRICK** and always require confirmation (except in `bypassPermissions` mode). These cannot be session-approved — each occurrence prompts individually.
+
+Detected patterns:
+- Command substitution: `$(cmd)`, `` `cmd` ``
+- Process substitution: `<(cmd)`, `>(cmd)`
+- Eval/exec: `eval "..."`, `exec ...`
+- Shell invocation: `bash -c "..."`, `sh -c "..."`
+- Pipe to shell: `... | bash`, `... | sh`
+- Source: `source script.sh`
+
 ## Limitations
 
 Pattern matching uses substring matching against the raw command string. This means:
