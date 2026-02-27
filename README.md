@@ -115,6 +115,18 @@ Configuration is loaded from two optional JSON files, merged in order (project o
 | `catastrophicPatterns` | See defaults | Commands always blocked, all modes |
 | `protectedPaths` | See defaults | Paths where writes are always blocked |
 
+## Limitations
+
+Pattern matching uses substring matching against the raw command string. This means:
+
+- Extra whitespace can bypass: `sudo  rm  -rf  /` won't match `sudo rm -rf /`
+- Path traversal can bypass: `rm -rf /tmp/../../../` resolves to root but won't match
+- Nested invocations can bypass: `bash -c "rm -rf /"` won't match
+
+This is the same limitation Claude Code has with its built-in permission system. For AST-based structural matching that catches these edge cases, use [`@aliou/pi-guardrails`](https://www.npmjs.com/package/@aliou/pi-guardrails) alongside this extension — guardrails parses the shell command into an AST and matches against the parsed structure.
+
+Protected path checking for bash commands also uses substring matching, which may produce false positives if a protected path string appears in a non-file context (e.g. inside a string argument or comment).
+
 ## Works With
 
 Designed to work alongside [`@aliou/pi-guardrails`](https://www.npmjs.com/package/@aliou/pi-guardrails). Guardrails handles `.env` file protection and AST-based dangerous command detection, while this extension handles the broader permission mode workflow.
