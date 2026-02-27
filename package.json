@@ -1,0 +1,38 @@
+{
+  "name": "@rhedbull/pi-permissions",
+  "version": "1.0.0",
+  "description": "Claude Code-style permission modes for pi. Controls approval for file writes, edits, and bash commands with four modes: default, acceptEdits, fullAuto, and bypassPermissions.",
+  "license": "MIT",
+  "author": "Hendrik",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "permissions",
+    "security",
+    "guardrails"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rhedbull/pi-permissions.git"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.51.0"
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
