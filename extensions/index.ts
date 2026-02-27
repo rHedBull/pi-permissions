@@ -71,21 +71,46 @@ const DEFAULT_DANGEROUS = [
  * Catastrophic patterns: ALWAYS blocked in every mode, including bypassPermissions.
  * These can destroy the system, are never needed for normal development,
  * and cannot be overridden via session approval.
+ *
+ * Note: rm -rf is NOT here — it's handled by the critical directory check below,
+ * which only blocks rm -rf targeting system/root directories while allowing it
+ * on normal project paths (e.g. rm -rf ./build, rm -rf node_modules).
  */
 const DEFAULT_CATASTROPHIC = [
-  { pattern: "sudo rm -rf /", description: "sudo recursive delete root" },
-  { pattern: "sudo rm -rf /*", description: "sudo recursive delete root contents" },
-  { pattern: "rm -rf /", description: "recursive delete root" },
-  { pattern: "rm -rf /*", description: "recursive delete root contents" },
   { pattern: "sudo mkfs", description: "sudo filesystem format" },
   { pattern: "mkfs.", description: "filesystem format" },
   { pattern: "dd if=", description: "raw disk write" },
   { pattern: ":(){ :|:& };:", description: "fork bomb" },
-  { pattern: "sudo chmod -R 777 /", description: "sudo open all permissions on root" },
-  { pattern: "sudo chown -R", description: "sudo recursive ownership change" },
   { pattern: "> /dev/sda", description: "overwrite disk" },
   { pattern: "> /dev/nvme", description: "overwrite disk" },
   { pattern: "sudo dd", description: "sudo raw disk operation" },
+];
+
+/**
+ * Critical directories: rm -rf targeting these is ALWAYS blocked.
+ * Paths are checked after resolving ~ to $HOME. A command like
+ * `rm -rf /home/user/project/build` is fine, but `rm -rf /` or
+ * `rm -rf /etc` is catastrophic.
+ */
+const CRITICAL_DIRS = [
+  "/",
+  "/bin",
+  "/boot",
+  "/dev",
+  "/etc",
+  "/home",
+  "/lib",
+  "/lib64",
+  "/opt",
+  "/proc",
+  "/root",
+  "/run",
+  "/sbin",
+  "/srv",
+  "/sys",
+  "/tmp",
+  "/usr",
+  "/var",
 ];
 
 /**
@@ -204,6 +229,17 @@ export default async function (pi: ExtensionAPI) {
     // CATASTROPHIC CHECK — always runs, every mode, no override
     if (toolName === "bash") {
       const command = String(event.input.command ?? "");
+
+      // Check critical rm -rf (only blocks system/root dirs, allows project paths)
+      const criticalRm = checkCriticalRmRf(command);
+      if (criticalRm) {
+        if (ctx.hasUI) {
+          ctx.ui.notify(`🚫 Blocked catastrophic command: ${criticalRm}`, "error");
+        }
+        return { block: true, reason: `Catastrophic command blocked: ${criticalRm}. This cannot be overridden.` };
+      }
+
+      // Check other catastrophic patterns (mkfs, dd, fork bomb, etc.)
       const catastrophe = findMatch(command, catastrophicPatterns);
       if (catastrophe) {
         if (ctx.hasUI) {
@@ -376,6 +412,68 @@ export default async function (pi: ExtensionAPI) {
 }
 
 // --- Helpers ---
+
+/**
+ * Check if a command contains rm -rf (or variants like rm -r -f, rm -fr)
+ * targeting a critical system directory. Returns description if catastrophic,
+ * null if safe.
+ */
+function checkCriticalRmRf(command: string): string | null {
+  // Match rm with -r and -f flags in any order, then capture the target path(s)
+  const rmPatterns = [
+    /\brm\s+(?:-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*)\s+(.*)/i,  // rm -rf, rm -fr, rm -rfi, etc.
+    /\brm\s+-r\s+-f\s+(.*)/i,   // rm -r -f
+    /\brm\s+-f\s+-r\s+(.*)/i,   // rm -f -r
+  ];
+
+  for (const pattern of rmPatterns) {
+    const match = command.match(pattern);
+    if (!match) continue;
+
+    const targets = match[1]!.trim().split(/\s+/).filter((t) => !t.startsWith("-"));
+    const home = homedir();
+
+    for (const target of targets) {
+      // Resolve the target path
+      const resolved = target === "~" ? home
+        : target.startsWith("~/") ? resolve(home, target.slice(2))
+        : target === "/*" ? "/"
+        : target.startsWith("/") ? target
+        : null; // relative paths are fine
+
+      if (!resolved) continue;
+
+      // Check exact match or direct child of root (e.g. /etc, /usr)
+      // But NOT deeper paths like /home/user/project
+      const normalized = resolved.replace(/\/+$/, "") || "/";
+
+      if (normalized === "/") {
+        return `rm -rf / — recursive delete root`;
+      }
+
+      // Check against critical dirs (exact match only)
+      for (const dir of CRITICAL_DIRS) {
+        if (normalized === dir) {
+          return `rm -rf ${dir} — recursive delete critical system directory`;
+        }
+      }
+
+      // Also block rm -rf ~ (entire home)
+      if (normalized === home) {
+        return `rm -rf ~ — recursive delete entire home directory`;
+      }
+    }
+  }
+
+  // Also check sudo variants
+  if (/\bsudo\s+/.test(command)) {
+    const withoutSudo = command.replace(/\bsudo\s+/, "");
+    const result = checkCriticalRmRf(withoutSudo);
+    if (result) return `sudo ${result}`;
+  }
+
+  return null;
+}
 
 function findMatch(
   command: string,
