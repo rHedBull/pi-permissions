@@ -5,7 +5,7 @@ Claude Code-style permission modes for [pi](https://www.npmjs.com/package/@mario
 ## Installation
 
 ```bash
-pi install npm:@rHedBull/pi-permissions
+pi install npm:@rhedbull/pi-permissions
 ```
 
 Or from git:

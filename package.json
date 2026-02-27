@@ -1,5 +1,5 @@
 {
-  "name": "@rHedBull/pi-permissions",
+  "name": "@rhedbull/pi-permissions",
   "version": "1.0.0",
   "description": "Claude Code-style permission modes for pi. Controls approval for file writes, edits, and bash commands with four modes: default, acceptEdits, fullAuto, and bypassPermissions.",
   "license": "MIT",
