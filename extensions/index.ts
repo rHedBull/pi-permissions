@@ -59,9 +59,12 @@ const MODES: { id: PermissionMode; label: string; description: string }[] = [
 /**
  * Dangerous patterns: require confirmation in default, acceptEdits, and fullAuto modes.
  * In bypassPermissions mode these are allowed without confirmation.
+ *
+ * Note: rm -rf is NOT here — it's handled by checkDangerousRmRf() which only
+ * flags rm -rf targeting paths outside the project directory. Project-scoped
+ * rm -rf (e.g. rm -rf node_modules, rm -rf dist/) auto-approves in fullAuto.
  */
 const DEFAULT_DANGEROUS = [
-  { pattern: "rm -rf", description: "recursive force delete" },
   { pattern: "chmod -R 777", description: "insecure recursive permissions" },
   { pattern: "chown -R", description: "recursive ownership change" },
   { pattern: "> /dev/", description: "direct device write" },
@@ -304,7 +307,8 @@ export default async function (pi: ExtensionAPI) {
       if (toolName === "bash") {
         const command = String(event.input.command ?? "");
         const danger = findMatch(command, dangerousPatterns);
-        if (!danger) return; // safe bash, allow
+        const rmDanger = checkDangerousRmRf(command, process.cwd());
+        if (!danger && !rmDanger) return; // safe bash, allow
       }
     }
 
@@ -475,6 +479,63 @@ function checkCriticalRmRf(command: string): string | null {
   return null;
 }
 
+/**
+ * Check if a command contains rm -rf targeting paths outside the project
+ * directory. Returns a description if dangerous, null if safe (all targets
+ * are within the project).
+ *
+ * This replaces the blunt "rm -rf" substring match in DEFAULT_DANGEROUS.
+ * Project-scoped rm -rf (e.g. rm -rf node_modules, rm -rf dist/) is safe
+ * and should auto-approve in fullAuto mode.
+ */
+function checkDangerousRmRf(command: string, cwd: string): { description: string } | null {
+  const rmPatterns = [
+    /\brm\s+(?:-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*)\s+(.*)/i,
+    /\brm\s+-r\s+-f\s+(.*)/i,
+    /\brm\s+-f\s+-r\s+(.*)/i,
+  ];
+
+  for (const pattern of rmPatterns) {
+    const match = command.match(pattern);
+    if (!match) continue;
+
+    // Extract targets: take only args before shell operators, skip flags
+    const rawArgs = match[1]!.trim().split(/\s*(?:&&|\|\||[;|])\s*/)[0]!;
+    const targets = rawArgs.split(/\s+/).filter((t) => !t.startsWith("-") && t.length > 0);
+    const home = homedir();
+    const normalizedCwd = resolve(cwd);
+
+    for (const target of targets) {
+      let resolved: string;
+      if (target === "~") {
+        resolved = home;
+      } else if (target.startsWith("~/")) {
+        resolved = resolve(home, target.slice(2));
+      } else if (target.startsWith("/")) {
+        resolved = target;
+      } else {
+        // Relative path — resolve against cwd (project directory)
+        resolved = resolve(cwd, target);
+      }
+
+      const normalized = resolve(resolved);
+
+      // If the resolved path is within or equal to cwd, it's safe (project-scoped)
+      if (normalized === normalizedCwd || normalized.startsWith(normalizedCwd + "/")) {
+        continue;
+      }
+
+      // Outside project → dangerous
+      return { description: `recursive force delete outside project (${target})` };
+    }
+
+    // All targets are within project → safe
+    return null;
+  }
+
+  return null;
+}
+
 function findMatch(
   command: string,
   patterns: { pattern: string; description: string }[],
@@ -502,6 +563,7 @@ async function promptApproval(
     const command = String(input.command ?? "");
     const catastrophe = findMatch(command, catastrophicPatterns);
     const danger = findMatch(command, dangerousPatterns);
+    const rmDanger = checkDangerousRmRf(command, process.cwd());
     const displayCmd = command.length > 200 ? command.slice(0, 200) + "…" : command;
 
     if (catastrophe) {
@@ -510,6 +572,9 @@ async function promptApproval(
     } else if (danger) {
       icon = "⚠️";
       description = `bash: ${displayCmd}\n   ⚠️  DANGEROUS: ${danger.description}`;
+    } else if (rmDanger) {
+      icon = "⚠️";
+      description = `bash: ${displayCmd}\n   ⚠️  DANGEROUS: ${rmDanger.description}`;
     } else {
       description = `bash: ${displayCmd}`;
     }
